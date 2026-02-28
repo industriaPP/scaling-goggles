@@ -1,0 +1,107 @@
+name: Tmate Session
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [start-tmate]
+
+jobs:
+  tmate-session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    continue-on-error: true
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq tmate curl wget git net-tools
+        tmate -V
+        echo "All dependencies installed"
+
+    - name: Start sshx.io + tmate sessions
+      run: |
+        #============================
+        # 1. Khởi động SSHX.IO
+        #============================
+        echo "Starting sshx.io..."
+        curl -sSf https://sshx.io/get | sh -s run > /tmp/sshx_output.txt 2>&1 &
+        SSHX_PID=$!
+
+        # Đợi sshx khởi tạo và lấy URL
+        sleep 10
+        SSHX_URL=""
+        for i in $(seq 1 12); do
+          SSHX_URL=$(grep -oP 'https://sshx\.io/s/[^\s]+' /tmp/sshx_output.txt | head -1)
+          if [ -n "$SSHX_URL" ]; then
+            break
+          fi
+          sleep 5
+        done
+
+        echo ""
+        echo "╔══════════════════════════════════════════╗"
+        echo "║        🌐 SSHX.IO (Web Terminal)        ║"
+        echo "╠══════════════════════════════════════════╣"
+        if [ -n "$SSHX_URL" ]; then
+          echo "║  Mở link này trên trình duyệt:          ║"
+          echo "╚══════════════════════════════════════════╝"
+          echo ""
+          echo "  👉 $SSHX_URL"
+        else
+          echo "║  Không lấy được URL, check log:         ║"
+          echo "╚══════════════════════════════════════════╝"
+          cat /tmp/sshx_output.txt
+        fi
+        echo ""
+
+        #============================
+        # 2. Khởi động TMATE
+        #============================
+        echo "Starting tmate..."
+        tmate -S /tmp/tmate.sock new-session -d
+        sleep 5
+        tmate -S /tmp/tmate.sock wait tmate-ready
+
+        TMATE_SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
+        TMATE_WEB=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')
+        TMATE_SSH_RO=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh_ro}')
+        TMATE_WEB_RO=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web_ro}')
+
+        echo "╔══════════════════════════════════════════╗"
+        echo "║        🔑 TMATE (SSH Terminal)           ║"
+        echo "╠══════════════════════════════════════════╣"
+        echo "║  SSH:                                    ║"
+        echo "╚══════════════════════════════════════════╝"
+        echo "  👉 $TMATE_SSH"
+        echo ""
+        echo "  🌐 Web: $TMATE_WEB"
+        echo ""
+        echo "  🔒 SSH Read-Only: $TMATE_SSH_RO"
+        echo "  🔒 Web Read-Only: $TMATE_WEB_RO"
+        echo ""
+        echo "╔══════════════════════════════════════════╗"
+        echo "║  ✅ Cả 2 session đang chạy!             ║"
+        echo "║  Dùng sshx.io (trình duyệt) cho dễ xài  ║"
+        echo "║  Hoặc dùng tmate SSH cho terminal        ║"
+        echo "║  Session mở trong ~350 phút              ║"
+        echo "╚══════════════════════════════════════════╝"
+
+        # Giữ cả 2 session mở
+        while true; do
+          # Kiểm tra tmate còn sống không
+          if ! tmate -S /tmp/tmate.sock has-session 2>/dev/null; then
+            echo "Tmate session ended."
+            break
+          fi
+          # Kiểm tra sshx còn sống không
+          if ! kill -0 $SSHX_PID 2>/dev/null; then
+            echo "sshx.io session ended, restarting..."
+            curl -sSf https://sshx.io/get | sh -s run > /tmp/sshx_output.txt 2>&1 &
+            SSHX_PID=$!
+          fi
+          sleep 60
+        done
+      timeout-minutes: 350
